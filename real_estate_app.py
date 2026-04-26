@@ -228,18 +228,18 @@ def acq_tax(price, own):
 def brokerage(p):
     return round(p * (0.005 if p < 2 else (0.004 if p < 9 else 0.009)), 4)
 
-def required_cash(price, jeonse, own, loan, regulated):
+def required_cash(price, jeonse, own, invest_type, cash_input, loan_input, regulated):
     tax  = acq_tax(price, own)
     brok = brokerage(price)
-    if loan:
-        ltv  = 0.5 if regulated else 0.7
-        l    = round(price * ltv, 4)
-        cash = round(price - l + tax + brok, 4)
-        mode = "대출 활용"
-    else:
+    if invest_type == "갭투자 (전세 임대)":
+        gap  = round(price - jeonse, 4)
+        cash = round(gap + tax + brok, 4)
+        mode = "갭투자"
         l    = 0
-        cash = round(price - jeonse + tax + brok, 4)
-        mode = "갭 투자"
+    else:
+        l    = loan_input
+        cash = round(price - l + tax + brok, 4)
+        mode = "실거주 (대출 활용)"
     return {"mode": mode, "취득세": tax, "복비": brok, "대출액": l, "필요현금": cash}
 
 def grade(gap_pct, mom):
@@ -446,13 +446,24 @@ with tab1:
         trend     = st.selectbox("최근 거래/매물 추이", ["상승 (매물↓, 거래↑)", "보합", "하락 (매물↑, 거래↓)"])
 
         st.subheader("⑤ 투자자 정보")
-        st.caption("직접 입력")
-        budget    = st.number_input("총 가용 자금 (억원)", 0.5, 200.0, 10.0, 0.5)
-        max_gap   = st.number_input("최대 허용 갭 (억원)", 0.5, 100.0, 5.0, 0.5)
-        own       = st.selectbox("보유 주택 수", ["1주택(=무주택)", "2주택 (조정지역)", "3주택↑ / 법인"])
-        use_loan  = st.checkbox("대출 실행", value=True)
-        regulated = st.checkbox("규제지역 (강남3구·용산)",
-                                value=any(k in region for k in ["강남구","서초구","송파구","용산구"]))
+        invest_type = st.selectbox("투자 방식", ["실거주", "갭투자 (전세 임대)"])
+        own         = st.selectbox("보유 주택 수", ["1주택(=무주택)", "2주택 (조정지역)", "3주택↑ / 법인"])
+        regulated   = st.checkbox("규제지역 (강남3구·용산)",
+                                   value=any(k in region for k in ["강남구","서초구","송파구","용산구"]))
+        cash_input  = st.number_input("보유 현금 (억원)", 0.0, 200.0, 3.0, 0.5)
+
+        if invest_type == "실거주":
+            loan_input    = st.number_input("대출 가능액 (억원)", 0.0, 200.0, 7.0, 0.5)
+            interest_rate = st.number_input("대출 금리 (%)", 1.0, 10.0, 4.0, 0.1)
+            budget        = round(cash_input + loan_input, 2)
+            max_gap       = 999
+        else:
+            loan_input    = 0.0
+            interest_rate = 0.0
+            budget        = cash_input
+            max_gap       = cash_input
+
+        st.caption(f"총 가용 자금: {budget}억")
 
         run = st.button("🔍 분석 시작", use_container_width=True, type="primary")
 
@@ -489,7 +500,7 @@ with tab1:
             A    = price_eok * 10000
             gp   = calc_gap(V, A)
             mom  = momentum(jr, supply, trend)
-            ci   = required_cash(price_eok, jeonse_eok, own, use_loan, regulated)
+            ci = required_cash(price_eok, jeonse_eok, own, invest_type, cash_input, loan_input, regulated)
             b_ok = ci["필요현금"] <= budget and (price_eok - jeonse_eok) <= max_gap
             ag   = round((asking_eok - actual_eok) / actual_eok * 100, 2) if actual_eok > 0 else None
             sig  = signal(gp, ag)
@@ -546,7 +557,8 @@ with tab1:
             b2.metric("취득세",   f"{ci['취득세']:.3f}억")
             b3.metric("복비",     f"{ci['복비']:.3f}억")
             if ci["대출액"] > 0:
-                st.info(f"예상 대출: {ci['대출액']:.2f}억 (LTV {'50%' if regulated else '70%'})")
+                monthly_interest = round(ci["대출액"] * (interest_rate / 100) / 12, 4)
+                st.info(f"예상 대출: {ci['대출액']:.2f}억 | 월 이자: {monthly_interest:.3f}억 ({monthly_interest*10000:.0f}만원)")
             if b_ok: st.success(f"✅ 예산 적합 — 가용 {budget}억 내 진입 가능")
             else:    st.error(f"❌ 예산 초과 — 필요 {ci['필요현금']:.2f}억 > 가용 {budget}억")
 
@@ -594,6 +606,7 @@ with tab1:
                     import plotly.graph_objects as go
 
                     df = pd.DataFrame(list(trend_data.items()), columns=["시점", "평균가(억)"])
+                    df = df.sort_values("시점").reset_index(drop=True)
 
                     fig = go.Figure()
                     fig.add_trace(go.Scatter(
