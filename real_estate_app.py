@@ -332,7 +332,7 @@ st.caption("서울·경기·인천 | 국토교통부 실거래가 API 연동")
 with st.expander("🔑 API 설정 (국토교통부 실거래가 자동 조회)", expanded=False):
     ac1, ac2 = st.columns([3, 1])
     with ac1:
-        svc_key = "7caf1b8d0d859d8f9d13a0423be934bc4e3ca5bdd6c26a57ce686f8d8764914b"
+        svc_key = st.secrets["MOLIT_KEY"]
     with ac2:
         use_api = True
 
